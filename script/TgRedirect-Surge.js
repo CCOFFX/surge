@@ -1,16 +1,22 @@
 /**
  * Telegram Redirect for Surge
  *
+ * 行为：
+ * - 所有 Telegram 链接都先显示客户端选择页
+ * - 不自动唤起任何客户端
+ * - 用户点击按钮后再打开对应 URL Scheme
+ *
  * 支持：
  * - t.me
  * - telegram.me
  * - NodeSeek jump?to=t.me
- *
- * 默认客户端：
- * argument=CLIENT=Swiftgram
  */
 
 const CLIENTS = [
+  {
+    name: "Swiftgram",
+    scheme: "sg"
+  },
   {
     name: "Telegram",
     scheme: "tg"
@@ -18,10 +24,6 @@ const CLIENTS = [
   {
     name: "Nagram",
     scheme: "tg"
-  },
-  {
-    name: "Swiftgram",
-    scheme: "sg"
   },
   {
     name: "Turrit",
@@ -53,23 +55,6 @@ function safeDecode(value) {
   } catch (_) {
     return value;
   }
-}
-
-function getDefaultClient() {
-  const argument =
-    typeof $argument === "string"
-      ? $argument
-      : "CLIENT=Swiftgram";
-
-  const match = argument.match(
-    /(?:^|&)CLIENT=([^&]+)/
-  );
-
-  if (!match) {
-    return "Swiftgram";
-  }
-
-  return safeDecode(match[1]).trim();
 }
 
 function getQueryParameter(query, key) {
@@ -110,36 +95,36 @@ function escapeHTML(value) {
 }
 
 /**
- * 解析 NodeSeek 跳转页。
+ * 解析 NodeSeek 外链跳转。
  *
  * 示例：
  * https://www.nodeseek.com/jump?to=https%3A%2F%2Ft.me%2Fbbqaqemby
  */
 function unwrapURL(url) {
   if (
-    /^https?:\/\/(?:www\.)?nodeseek\.com\/jump(?:\?|$)/i.test(
-      url
-    )
+    /^https?:\/\/(?:www\.)?nodeseek\.com\/jump(?:\?|$)/i.test(url)
   ) {
     const queryIndex = url.indexOf("?");
 
-    if (queryIndex < 0) {
-      return url;
-    }
+    if (queryIndex >= 0) {
+      const query = url.slice(queryIndex + 1);
 
-    const query = url.slice(queryIndex + 1);
-    const target = getQueryParameter(
-      query,
-      "to"
-    );
+      const target = getQueryParameter(
+        query,
+        "to"
+      );
 
-    if (
-      /^https?:\/\/(?:t\.me|telegram\.me)\//i.test(
-        target
-      )
-    ) {
-      log(`NodeSeek unwrap: ${url} -> ${target}`);
-      return target;
+      if (
+        /^https?:\/\/(?:t\.me|telegram\.me)\//i.test(
+          target
+        )
+      ) {
+        log(
+          `NodeSeek unwrap: ${url} -> ${target}`
+        );
+
+        return target;
+      }
     }
   }
 
@@ -147,7 +132,7 @@ function unwrapURL(url) {
 }
 
 /**
- * Telegram HTTPS 链接 -> 自定义 Scheme。
+ * Telegram HTTPS 链接 -> App Deep Link。
  */
 function buildDeepLink(
   scheme,
@@ -222,15 +207,17 @@ function buildDeepLink(
     parts[1].toLowerCase() ===
       "url"
   ) {
-    const url = getQueryParameter(
-      query,
-      "url"
-    );
+    const url =
+      getQueryParameter(
+        query,
+        "url"
+      );
 
-    const text = getQueryParameter(
-      query,
-      "text"
-    );
+    const text =
+      getQueryParameter(
+        query,
+        "text"
+      );
 
     const params = [];
 
@@ -294,9 +281,6 @@ function parseTelegramURL(url) {
 
   let tail = match[1];
 
-  /**
-   * 去掉 fragment
-   */
   const hashIndex =
     tail.indexOf("#");
 
@@ -338,9 +322,6 @@ function parseTelegramURL(url) {
   };
 }
 
-/**
- * 根据客户端生成目标 Scheme URL。
- */
 function createClientLink(
   client,
   telegramInfo
@@ -352,35 +333,10 @@ function createClientLink(
   );
 }
 
-/**
- * 构造选择页面。
- */
 function buildHTML(
-  defaultClientName,
-  telegramInfo
+  telegramInfo,
+  originalURL
 ) {
-  let defaultClient =
-    CLIENTS.find(
-      item =>
-        item.name ===
-        defaultClientName
-    );
-
-  if (!defaultClient) {
-    defaultClient =
-      CLIENTS.find(
-        item =>
-          item.name ===
-          "Swiftgram"
-      );
-  }
-
-  const defaultLink =
-    createClientLink(
-      defaultClient,
-      telegramInfo
-    );
-
   const buttons =
     CLIENTS.map(client => {
       const link =
@@ -389,35 +345,14 @@ function buildHTML(
           telegramInfo
         );
 
-      const active =
-        client.name ===
-        defaultClient.name;
-
       return `
 <a
-  class="client-button ${
-    active
-      ? "default"
-      : ""
-  }"
+  class="client-button"
   href="${escapeHTML(link)}"
 >
-  <span class="client-name">
-    ${escapeHTML(client.name)}
-  </span>
-
-  ${
-    active
-      ? `<span class="tag">默认</span>`
-      : ""
-  }
+  ${escapeHTML(client.name)}
 </a>`;
     }).join("");
-
-  const jsDefaultLink =
-    JSON.stringify(
-      defaultLink
-    );
 
   return `<!doctype html>
 
@@ -489,12 +424,7 @@ body {
 
 .card {
   background:
-    rgba(
-      255,
-      255,
-      255,
-      0.96
-    );
+    #ffffff;
 
   border-radius:
     22px;
@@ -562,7 +492,7 @@ body {
     center;
 
   justify-content:
-    space-between;
+    center;
 
   width:
     100%;
@@ -589,7 +519,7 @@ body {
     16px;
 
   font-weight:
-    500;
+    550;
 
   -webkit-tap-highlight-color:
     transparent;
@@ -600,59 +530,38 @@ body {
     scale(0.985);
 
   opacity:
-    0.8;
+    0.75;
 }
 
-.client-button.default {
-  background:
-    #168de2;
-
-  color:
-    #ffffff;
-}
-
-.client-name {
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
-}
-
-.tag {
-  flex-shrink:
-    0;
-
-  margin-left:
-    12px;
+.target {
+  margin:
+    20px 4px 0;
 
   padding:
-    4px 8px;
+    12px 14px;
 
   border-radius:
-    999px;
-
-  font-size:
-    11px;
+    12px;
 
   background:
-    rgba(
-      255,
-      255,
-      255,
-      0.20
-    );
+    #f5f5f7;
+
+  font-size:
+    12px;
+
+  line-height:
+    1.5;
 
   color:
-    inherit;
+    #888888;
+
+  word-break:
+    break-all;
 }
 
 .footer {
   margin:
-    20px 4px 0;
+    18px 4px 0;
 
   text-align:
     center;
@@ -660,11 +569,8 @@ body {
   font-size:
     12px;
 
-  line-height:
-    1.6;
-
   color:
-    #999999;
+    #aaaaaa;
 }
 
 </style>
@@ -682,16 +588,15 @@ body {
     </h1>
 
     <p class="subtitle">
-      默认尝试打开
-      ${escapeHTML(
-        defaultClient.name
-      )}。
-      如果没有自动跳转，
-      可以选择下面任意客户端。
+      选择要使用的客户端打开此链接
     </p>
 
     <div class="client-list">
       ${buttons}
+    </div>
+
+    <div class="target">
+      ${escapeHTML(originalURL)}
     </div>
 
   </div>
@@ -701,35 +606,6 @@ body {
   </div>
 
 </div>
-
-<script>
-
-(function () {
-
-  var target =
-    ${jsDefaultLink};
-
-  /**
-   * 尝试自动打开默认客户端。
-   *
-   * Safari 通常会允许。
-   * Chrome 可能要求用户手势，
-   * 此时保留选择页面。
-   */
-
-  setTimeout(
-    function () {
-      try {
-        window.location.href =
-          target;
-      } catch (_) {}
-    },
-    80
-  );
-
-})();
-
-</script>
 
 </body>
 
@@ -741,9 +617,6 @@ function finishWithoutModification() {
 }
 
 function main() {
-  const defaultClient =
-    getDefaultClient();
-
   let requestURL =
     (
       $request &&
@@ -754,9 +627,7 @@ function main() {
       : "";
 
   if (!requestURL) {
-    log(
-      "No request URL."
-    );
+    log("No request URL.");
 
     finishWithoutModification();
 
@@ -767,20 +638,17 @@ function main() {
     `Original URL: ${requestURL}`
   );
 
-  /**
-   * NodeSeek 等包装 URL 解包。
-   */
-  requestURL =
+  const unwrappedURL =
     unwrapURL(requestURL);
 
   const telegramInfo =
     parseTelegramURL(
-      requestURL
+      unwrappedURL
     );
 
   if (!telegramInfo) {
     log(
-      `Not Telegram URL: ${requestURL}`
+      `Not Telegram URL: ${unwrappedURL}`
     );
 
     finishWithoutModification();
@@ -788,14 +656,10 @@ function main() {
     return;
   }
 
-  log(
-    `Default client: ${defaultClient}`
-  );
-
   const body =
     buildHTML(
-      defaultClient,
-      telegramInfo
+      telegramInfo,
+      unwrappedURL
     );
 
   $done({
